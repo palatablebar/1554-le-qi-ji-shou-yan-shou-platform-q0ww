@@ -1,0 +1,24 @@
+{
+  "key": "IN-1101",
+  "cohort": "键盘店",
+  "day": 2,
+  "received": 3,
+  "revision": 1,
+  "result_day": 5,
+  "outcome": 0.0,
+  "observed": true,
+  "form": {
+    "品相记录": {
+      "wear_in_tenths": 30,
+      "previous_repairs": 2
+    },
+    "估价单": {
+      "setup_hours_old": 1632,
+      "usable_witness_photos": 10
+    },
+    "试奏交接": {
+      "asking_basis_points": 8000,
+      "recorded_play_sec": 960
+    }
+  }
+}

@@ -32,9 +32,11 @@ class InstrumentdeskRecord:
     photos: float | None
     price_index: float | None
     play_log: float | None
+    body_number: str | None = None
 
     def signature(self):
         return (self.key, self.cohort, self.day, self.revision, self.result_day, self.outcome, self.observed,
+                self.body_number,
                 *(getattr(self, key) for key in FIELDS))
 
 

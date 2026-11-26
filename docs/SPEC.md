@@ -63,3 +63,29 @@
 ### 琴台二验排单
 
 按维修经历、校准龄期和有效照片估算复验分钟和补拍张数。已经分派的琴单占用本班琴台时段，挂牌价核对记录交给寄售专员签认。 在派发环节展开现场安排，或从关联单据回查实际读数。
+
+## 跨店重挂与按琴签发
+
+同一把琴跨店重挂会产生新单号，用琴身编号归并。原始单据读取 `body_number`，并兼容 `serial_number`、`body_no`、`instrument_id`、`琴身编号` 等常见写法；无编号时不做归并，完全沿用原寄售单。
+
+| 规则 | 判定 | 去向 / 依据码 |
+|---|---|---|
+| 最新挂牌接单 | `received <= as_of` 的挂牌中取到站日最大者；同日读数一致时按工日、版次、单号确定性决胜 | `LATEST_LISTING_ACCEPTED` |
+| 同日最新冲突 | 最大到站日有两张及以上且六项读数不一致 | `SAME_DAY_LISTING_CONFLICT` → `人工判读`，换序结论一致 |
+| 补照暂停延续 | 在途旧单命中 `MISSING_DETAIL`（`wear_grade>=7 and photos<=6`，只认真实读数） | 新单未满足照片门槛前，中选单强制 `暂停/MISSING_DETAIL` |
+| 七张实拍解除 | 中选新单 `photos` 为实测且 `>= 7` | `PHOTO_HOLD_RELEASED`，旧单由最新挂牌接替 |
+| 一琴一单 | 每个琴身编号至多一张 `已分派`/签发单 | `BODY_SINGLE_SIGNING`、落选单 `BODY_SUPERSEDED` |
+| 无编号 | 无琴身编号 | `NO_BODY_USE_ORIGINAL`，沿用原单 |
+| 防样本泄漏 | 琴身编号出现在拟合训练段后，其校准/回放记录退出对应窗口 | `BODY_SEEN_IN_TRAIN`（记入 `windows.leakage` 与窗口隔离） |
+
+风险估计始终取自中选新挂牌自己的门店分组与六项实测（缺测仍走冻结补值），不沿用旧单预测。全部聚合按编号排序，输入换序后 `rows`、`instruments` 与 `run_id` 保持一致。
+
+`execute()` 结果额外提供：
+
+- `instruments` / `instrument_index`（别名 `body_index`、`relistings`、`instrument_trace`、`按琴查询`）：每把琴的 `去向`、`依据`、`accepted_key`、`signed_key`、`signed`、涉及单据与照片门槛。
+- `signings` / `签发清册`：一琴一单的签发清册。
+- `leakage_excluded`：因训练见过而退出校准/回放的单据。
+- 每行附加 `body_number`/`琴身编号`、`signed`/`已签发`、`去向` 与 `依据`。
+
+查询入口：`GET /api/instrumentdesk/instruments/<琴身编号>`（另有 `/instrument/`、`/trace/`、`/by-instrument/` 别名），总览接口支持 `?body=`、`?instrument=`、`?q=`，页面顶部“按琴查询”可直接看到去向和依据，也可用 `/?body=<编号>` 服务端直出。
+

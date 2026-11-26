@@ -152,3 +152,14 @@ tr:hover td { background: var(--wash); }
   .exhibit .evidence-slip { background: transparent; border-block-end: 1px solid #cfb099; margin-block: 0; padding-block: 12px; }
   .exhibit .queue .table-scroll { max-height: 520px; }
 }
+
+.instrument-lookup { padding: 4px var(--pad) 12px; border-block-end: 1px dashed var(--line); margin-bottom: 8px; }
+.instrument-lookup label { font-weight: 700; margin-inline-end: 7px; }
+.instrument-lookup input[type=search] { width: min(320px, 100%); }
+.lookup-help { margin: 6px 0 0; color: var(--quiet); font-size: 12.5px; }
+.lookup-result { margin-top: 10px; display: grid; gap: 10px; }
+.instrument-card { border: 1px solid var(--line); border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius); background: var(--surface); padding: 11px 13px; }
+.instrument-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.basis-list { margin: 6px 0 0; padding-inline-start: 20px; display: grid; gap: 3px; font-size: 13.5px; color: #5c4636; }
+.instrument-detail-basis .basis-list { margin-bottom: 8px; }

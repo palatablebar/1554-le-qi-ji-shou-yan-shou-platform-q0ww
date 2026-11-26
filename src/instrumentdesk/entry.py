@@ -36,7 +36,13 @@ def public_plan(payload):
 class WorkbenchView(MethodView):
     def get(self, stage=None):
         if stage is None:
-            return preview()
+            report = preview()
+            wanted = request.args.get('instrument') or request.args.get('body_number') or request.args.get('q')
+            if wanted:
+                key = wanted.strip().casefold()
+                report['lookup'] = [card for card in report['instruments']
+                                    if key in str(card['body_number']).casefold()]
+            return report
         paths=[item[0] for item in MODULES]
         if stage not in paths:
             return {'code':'UNKNOWN_STAGE','message':'没有该环节'},404
@@ -56,9 +62,36 @@ class WorkbenchView(MethodView):
             return {'code':'INVALID_BATCH','message':str(rejected)},422
 
 
+class InstrumentQueryView(MethodView):
+    """按琴身编号查询去向与依据（样例班次）。"""
+
+    def get(self, code=None):
+        report = preview()
+        if code is None:
+            return {'run_id': report['run_id'], 'instruments': report['instruments'],
+                    'signings': report['signings'], 'count': report['body_count']}
+        wanted = code.strip()
+        matches = [card for card in report['instruments']
+                   if wanted.casefold() in str(card['body_number']).casefold()]
+        return {'run_id': report['run_id'], 'query': wanted, 'found': bool(matches),
+                'matches': matches,
+                'result': matches[0] if len(matches) == 1 else None}
+
+
 @app.get('/')
 def home():
-    return render_template('desk.html',modules=MODULES,display=DISPLAY)
+    lookup_query = None
+    lookup_cards = None
+    wanted = request.args.get('body') or request.args.get('body_number') \
+        or request.args.get('instrument') or request.args.get('qin') or request.args.get('q')
+    if wanted:
+        lookup_query = wanted.strip()
+        report = preview()
+        key = lookup_query.casefold()
+        lookup_cards = [card for card in report['instruments']
+                        if key in str(card['body_number']).casefold()]
+    return render_template('desk.html', modules=MODULES, display=DISPLAY,
+                           lookup_query=lookup_query, lookup_cards=lookup_cards)
 
 
 @app.get('/health')
@@ -75,6 +108,19 @@ handler=WorkbenchView.as_view('workbench')
 app.add_url_rule('/api/instrumentdesk/overview',view_func=handler,methods=['GET'])
 app.add_url_rule('/api/instrumentdesk/stages/<stage>',view_func=handler,methods=['GET'])
 app.add_url_rule('/api/instrumentdesk/run',view_func=handler,methods=['POST'])
+
+instrument_collection=InstrumentQueryView.as_view('instrument_collection')
+instrument_query=InstrumentQueryView.as_view('instrument_query')
+for path in ('/api/instrumentdesk/instruments',
+             '/api/instrumentdesk/relistings',
+             '/api/instrumentdesk/body-index'):
+    app.add_url_rule(path, view_func=instrument_collection, methods=['GET'])
+for path in ('/api/instrumentdesk/instruments/<path:code>',
+             '/api/instrumentdesk/instrument/<path:code>',
+             '/api/instrumentdesk/trace/<path:code>',
+             '/api/instrumentdesk/by-instrument/<path:code>',
+             '/api/instrumentdesk/relistings/<path:code>'):
+    app.add_url_rule(path, view_func=instrument_query, methods=['GET'])
 
 
 def cli_evaluate(options):

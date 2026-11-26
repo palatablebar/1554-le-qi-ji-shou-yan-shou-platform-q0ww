@@ -107,7 +107,19 @@ function showDetail() {
         byId('detail-note').textContent = `${currentItem.key} · ${currentItem.zone}`;
         const details = node('dl',undefined,'record-fields');
         Object.entries(order).forEach(([key,title]) => details.append(node('dt',title),node('dd',currentItem[key])));
+        if (currentItem.body_number) {
+            details.append(node('dt','琴身编号'),node('dd',currentItem.body_number));
+            details.append(node('dt','按琴去向'),node('dd',currentItem['去向'] ?? currentItem.instrument_destination));
+        }
         card.append(details);
+        if (Array.isArray(currentItem['依据']) && currentItem['依据'].length) {
+            const basisBox = node('div',undefined,'instrument-detail-basis');
+            basisBox.append(node('h3','按琴判定依据','inner-heading'));
+            const list = node('ul',undefined,'basis-list');
+            currentItem['依据'].forEach(text => list.append(node('li',text)));
+            basisBox.append(list);
+            card.append(basisBox);
+        }
         const plan = ledger.sections.find(section => section.operating_rows);
         const fieldNotes = plan?.operating_rows.filter(item => item['关联单据'] === currentItem.key);
         if (fieldNotes?.length) {
@@ -151,9 +163,72 @@ function showQueue() {
     const sought = byId('filter').value.trim().toLocaleLowerCase('zh-CN');
     const state = byId('status-filter').value;
     const rows = ledger.rows.filter(item => (!state || item.state === state) &&
-          (!sought || [item.key,item.zone,item.reason,item.evidence].some(text => text.toLocaleLowerCase('zh-CN').includes(sought))));
+          (!sought || [item.key,item.body_number,item['琴身编号'],item.zone,item.reason,item.evidence,
+                       item['去向'],Array.isArray(item['依据']) ? item['依据'].join(' ') : '']
+              .filter(text => text !== null && text !== undefined)
+              .some(text => String(text).toLocaleLowerCase('zh-CN').includes(sought))));
     byId('row-count').textContent = `${rows.length}/${ledger.rows.length} 条`;
     byId('work-rows').replaceChildren(rows.length ? rowsTable(rows,visibleOrder,{labels:order,choose:inspect}) : node('p','当前条件下没有匹配单据','empty'));
+}
+
+function instrumentCards() {
+    return ledger?.instruments ?? [];
+}
+
+function renderInstrumentLookup() {
+    const target = byId('instrument-result');
+    if (!target || !ledger) return;
+    const input = byId('instrument-filter');
+    const sought = (input?.value ?? '').trim().toLocaleLowerCase('zh-CN');
+    target.replaceChildren();
+    if (!sought) return;
+    const matches = instrumentCards().filter(card =>
+        String(card.body_number ?? '').toLocaleLowerCase('zh-CN').includes(sought));
+    if (!matches.length) {
+        target.append(node('p', `没有琴身编号匹配“${input.value.trim()}”；无编号琴请用下方查单按原单号查询。`, 'empty'));
+        return;
+    }
+    for (const card of matches) {
+        const box = node('div', undefined, 'instrument-card');
+        const head = node('div', undefined, 'instrument-card-head');
+        head.append(node('strong', `琴 ${card.body_number}`));
+        const badge = node('span', card['去向'] || card.destination, 'state');
+        badge.dataset.state = card.state;
+        head.append(badge);
+        box.append(head);
+        const grid = node('dl', undefined, 'record-fields');
+        const add = (dt, dd) => grid.append(node('dt', dt), node('dd', dd));
+        add('去向', card['去向']);
+        add('签发单号', card.signed_key ?? '暂不签发');
+        add('接单最新挂牌', card.accepted_key ?? '—');
+        if (card.cohort) add('实测门店', card.cohort);
+        if (card.actual_photos !== undefined) add('新单实拍照片', `${card.actual_photos ?? '未实测'} 张（满 7 张解除补照）`);
+        add('涉及单据', (card.all_keys ?? card.listing_keys ?? []).join('、') || '—');
+        box.append(grid);
+        const basis = node('ul', undefined, 'basis-list');
+        for (const reason of (card['依据'] ?? card.basis ?? [])) basis.append(node('li', reason));
+        box.append(node('h4', '判定依据', 'inner-heading'), basis);
+        const keys = card.all_keys ?? card.listing_keys ?? [];
+        const openKey = card.signed_key || card.accepted_key || keys[0];
+        const ticket = ledger.rows.find(item => item.key === openKey);
+        if (ticket) {
+            const button = node('button', '查看单据处置与量测', 'ghost');
+            button.type = 'button';
+            button.addEventListener('click', () => inspect(ticket));
+            box.append(button);
+        }
+        target.append(box);
+    }
+}
+
+function syncInstrumentFromFilter() {
+    // 查单框输入琴身编号时，同步展开“按琴查询”的去向依据卡。
+    const q = byId('filter')?.value.trim() ?? '';
+    const box = byId('instrument-filter');
+    if (box && q && instrumentCards().some(c => String(c.body_number).includes(q))) {
+        box.value = q;
+    }
+    renderInstrumentLookup();
 }
 
 function redraw(data) {
@@ -171,6 +246,7 @@ function redraw(data) {
     plot.replaceChildren();
     renderVisual(plot,data);
     showQueue();
+    renderInstrumentLookup();
     showDetail();
     byId('save').disabled = false;
 }
@@ -200,7 +276,8 @@ nav.forEach((control,i) => control.addEventListener('click',() => {
     byId('detail').scrollIntoView({block:'nearest'});
     byId('detail-title').focus({preventScroll:true});
 }));
-byId('filter').addEventListener('input',showQueue);
+byId('filter').addEventListener('input',() => { showQueue(); syncInstrumentFromFilter(); });
+byId('instrument-filter').addEventListener('input',renderInstrumentLookup);
 byId('status-filter').addEventListener('change',showQueue);
 byId('scenario').addEventListener('submit',async (event) => {
     event.preventDefault();
@@ -272,4 +349,11 @@ byId('restore').addEventListener('click',async () => {
         reset.disabled = false;
     }
 });
+(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('body') || params.get('body_number') || params.get('instrument')
+              || params.get('qin') || params.get('q');
+    const box = byId('instrument-filter');
+    if (q && box) box.value = q;
+})();
 prepare();

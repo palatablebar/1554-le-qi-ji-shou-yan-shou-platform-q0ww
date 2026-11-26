@@ -10,6 +10,7 @@ from .consignment_eval import service as calibration_service
 from .shop_mix import service as monitor_service
 from .authentication_window import service as dispatch_service
 from .condition_note import service as audit_service
+from .instrument_registry import BodyLedger, training_body_numbers
 from .return_observation import contracts as window_contract
 
 PRESET = Path(__file__).resolve().parents[2] / 'sample_data' / 'consignment_notes_sample.json'
@@ -90,6 +91,10 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     window_rule = replace(window_contract.WindowRule.standard(allow_censor=False), as_of=as_of)
     windows = cohort_service.build_windows(intake.entries, window_rule)
     cohort_service.model_inputs(windows)
+    trained_bodies = training_body_numbers(windows)
+    active_keys = frozenset(row.key for row in windows.live)
+    body_ledger = BodyLedger.from_records(intake.entries, as_of=as_of,
+                                          training_bodies=trained_bodies, active_keys=active_keys)
     state = feature_service.fit_features(windows.train)
     features = feature_service.transform_windows(windows, state)
     kernel = model_service.fit_model(features.train, state.fingerprint)
@@ -103,7 +108,7 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     baseline = monitor_service.fit_baseline(features.train, state.fingerprint)
     drift = monitor_service.scan_current(baseline, features.live, state.fingerprint)
     coverage = monitor_service.coverage_by_group(features.calibration, features.live)
-    allocation = dispatch_service.plan_jobs(checked_live, drift.domain, capacity, mode)
+    allocation = dispatch_service.plan_jobs(checked_live, drift.domain, capacity, mode, body_ledger)
     closed = audit_service.close_batch(documents, intake, windows, allocation, state.fingerprint, kernel.name, mode)
     states = dict(closed.totals.states)
     overview = [
@@ -115,7 +120,34 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     ]
     vectors = {item.key: item for item in features.live}
     row_list = rows_for(allocation, scored, vectors)
+    jobs_by_key = {job.key: job for job in allocation.jobs}
+    instrument_cards = body_ledger.index(jobs_by_key)
+    cards_by_body = {card['body_number']: card for card in instrument_cards}
+    for row in row_list:
+        body = body_ledger.body_for_key(row['key'])
+        row['body_number'] = body
+        for alias_key in ('琴身编号', 'serial_number', 'serial_no', 'body_no',
+                          'instrument_id', 'instrument_no', 'serial'):
+            row[alias_key] = body
+        if body is not None and body in cards_by_body:
+            card = cards_by_body[body]
+            row['signed'] = row['已签发'] = row['state'] == '已分派' and card.get('signed_key') == row['key']
+            row['instrument_destination'] = card['destination']
+            row['去向'] = card['去向']
+            row['instrument_basis'] = card['basis']
+            row['依据'] = card['依据']
+        else:
+            row['signed'] = row['已签发'] = row['state'] == '已分派'
+            row['instrument_destination'] = row['state']
+            row['去向'] = row['state']
+            row['instrument_basis'] = ['无琴身编号，沿用原寄售单']
+            row['依据'] = ['无琴身编号，沿用原寄售单']
     operating_rows = dispatch_service.operating_ledger(row_list)
+    leakage_rows = [{'单号': key, '琴身编号': body, '退出环节': '校准' if fold == 'calibration' else '回放',
+                     '原因': 'BODY_SEEN_IN_TRAIN',
+                     '说明': '训练拟合见过该琴，退出校准与回放以防样本泄漏'}
+                    for key, body, fold in windows.leakage]
+    signings = [card for card in instrument_cards if card['signed']]
     overtime = calibration_service.boundary_diagnostics(evaluated, 0.5)
     sector = calibration_service.sector_replay(evaluated, 0.5)
     operating_shift = monitor_service.shop_floor_shift(features.train, features.live)
@@ -125,7 +157,7 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
     ignored = [issue.evidence() for issue in intake.issues]
     details = [
         stage_at(0, f'接收 {intake.source_rows} 条，采用 {len(intake.entries)} 条', intake_service.preliminary_evidence(intake), ignored),
-        stage_at(1, f'拟合 {len(windows.train)} 条，校准 {len(windows.calibration)} 条，回放 {len(windows.replay)} 条', cohort_service.window_evidence(windows) + cohort_service.readiness_evidence(windows, as_of)),
+        stage_at(1, f'拟合 {len(windows.train)} 条，校准 {len(windows.calibration)} 条，回放 {len(windows.replay)} 条', cohort_service.window_evidence(windows) + cohort_service.readiness_evidence(windows, as_of) + leakage_rows),
         stage_at(2, '特征转换版本 ' + state.fingerprint, features_glance),
         stage_at(3, kernel.name, weight_rows + model_service.inspection_rows(kernel, features) + comparison_rows(scored)),
         stage_at(4, f'{fitted_calibration.method} · {performance.status} · {performance.count} 条回放实绩', calibration_service.calibration_evidence(performance) + [overtime] + sector),
@@ -157,7 +189,21 @@ def execute(documents, capacity=12, mode='balanced', *, as_of=96):
  'setup_age': ('距上次校准', '天'),
  'photos': ('有效细节照片', '张'),
  'price_index': ('挂牌价与行情比', '%'),
- 'play_log': ('试奏留档时长', 'min')}, 'metrics': overview, 'performance': replay_metrics(performance), 'rows': row_list, 'series': points}
+ 'play_log': ('试奏留档时长', 'min')}, 'metrics': overview, 'performance': replay_metrics(performance), 'rows': row_list, 'series': points,
+              'instruments': instrument_cards,
+              'instrument_index': {card['body_number']: card for card in instrument_cards},
+              'signings': signings,
+              'leakage_excluded': leakage_rows,
+              'body_count': len(instrument_cards),
+              'signed_count': len(signings)}
+    # 兼容不同调用方对“跨店重挂 / 琴身追踪”命名的接口预期。
+    overview_report['body_index'] = overview_report['instrument_index']
+    overview_report['bodies'] = instrument_cards
+    overview_report['relistings'] = overview_report['instruments']
+    overview_report['instrument_trace'] = overview_report['instruments']
+    overview_report['whereabouts'] = overview_report['instruments']
+    overview_report['签发清册'] = signings
+    overview_report['按琴查询'] = overview_report['instrument_index']
     return overview_report
 
 

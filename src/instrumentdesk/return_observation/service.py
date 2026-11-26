@@ -3,6 +3,7 @@ from dataclasses import replace
 
 from .contracts import Chronology, FoldSummary, Span, WindowRule
 from .readiness import formation_tail
+from ..instrument_registry import body_of
 
 
 def assign_fold(record, rule):
@@ -31,9 +32,21 @@ def build_windows(records, rule=None):
     schedule=rule or WindowRule.standard(allow_censor=False)
     book=tuple(sorted(records,key=lambda row:(row.day,row.key)))
     observed=tuple((item,*assign_fold(item,schedule)) for item in book)
-    findings = {stage:tuple(item for item,label,_ in observed if stage==label) for stage in ('train','calibration','replay','live')}
-    isolated=tuple(sorted((ticket.key,reason) for ticket,stage,reason in observed if stage is None))
-    document=Chronology(**findings,excluded=isolated)
+    # 防样本泄漏：训练段见过的琴身编号，其跨店重挂单必须退出校准与回放。
+    trained_bodies={body_of(item) for item,stage,_ in observed
+                    if stage=='train' and body_of(item)}
+    screened=[]
+    leakage=[]
+    for item,stage,reason in observed:
+        body=body_of(item)
+        if stage in ('calibration','replay') and body and body in trained_bodies:
+            leakage.append((item.key,body,stage))
+            screened.append((item,None,'BODY_SEEN_IN_TRAIN'))
+        else:
+            screened.append((item,stage,reason))
+    findings = {stage:tuple(item for item,label,_ in screened if stage==label) for stage in ('train','calibration','replay','live')}
+    isolated=tuple(sorted((ticket.key,reason) for ticket,stage,reason in screened if stage is None))
+    document=Chronology(**findings,excluded=isolated,leakage=tuple(sorted(leakage)))
     document.check_conservation(len(book))
     return document
 

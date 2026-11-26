@@ -4,6 +4,7 @@ from math import isfinite
 
 def accountable_plan(rows, actual_balance, starting_capacity):
     seen = set()
+    signed_bodies = set()
     counts = Counter()
     total = 0
     for row in rows:
@@ -13,8 +14,14 @@ def accountable_plan(rows, actual_balance, starting_capacity):
         seen.add(key)
         state = row['state']
         counts[state] += 1
+        body = row.get('body_number') or row.get('琴身编号')
         if state == '已分派':
             total += row['cost']
+            # 同一琴身编号只签发一单二验；无编号单不参与琴身去重。
+            if body:
+                if body in signed_bodies:
+                    raise ArithmeticError('同一琴身编号只能签发一单二验')
+                signed_bodies.add(body)
         if not isfinite(row['estimate']):
             raise ArithmeticError('非有限估计不能签发')
     if total + actual_balance != starting_capacity:

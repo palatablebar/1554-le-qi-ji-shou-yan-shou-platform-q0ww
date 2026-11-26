@@ -56,6 +56,33 @@
 </section>
 <section class="panel queue" aria-labelledby="queue-title">
   <div class="panel-head"><h2 id="queue-title">{{ display.queue }}</h2><output id="row-count" aria-live="polite"></output></div>
+  <div class="instrument-lookup">
+    <label for="instrument-filter">按琴查询</label>
+    <input type="search" id="instrument-filter" placeholder="输入琴身编号，查去向和依据" aria-describedby="instrument-help"{% if lookup_query %} value="{{ lookup_query }}"{% endif %}>
+    <p class="lookup-help" id="instrument-help">同一琴身编号只签一单；无编号单据沿用原寄售单。</p>
+    <div id="instrument-result" class="lookup-result" aria-live="polite">
+      {% if lookup_query is not none %}
+        {% if lookup_cards %}
+          {% for card in lookup_cards %}
+          <article class="instrument-card" data-server-rendered="true">
+            <div class="instrument-card-head"><strong>琴 {{ card.body_number }}</strong>
+              <span class="state" data-state="{{ card.state }}">{{ card['去向'] }}</span></div>
+            <dl class="record-fields">
+              <dt>去向</dt><dd>{{ card['去向'] }}</dd>
+              <dt>签发单号</dt><dd>{{ card.signed_key or '暂不签发' }}</dd>
+              <dt>接单最新挂牌</dt><dd>{{ card.accepted_key or '—' }}</dd>
+              <dt>涉及单据</dt><dd>{{ card.all_keys | join('、') }}</dd>
+            </dl>
+            <h4 class="inner-heading">判定依据</h4>
+            <ul class="basis-list">{% for reason in card['依据'] %}<li>{{ reason }}</li>{% endfor %}</ul>
+          </article>
+          {% endfor %}
+        {% else %}
+          <p class="empty">没有琴身编号匹配“{{ lookup_query }}”；无编号琴按原单号查询。</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
   <div class="filters">
     <label for="filter">查单</label><input type="search" id="filter" placeholder="单号、作业区、原因">
     <label for="status-filter" class="sr-only">处置状态</label>

@@ -57,6 +57,7 @@ class Chronology:
     replay: tuple[InstrumentdeskRecord, ...]
     live: tuple[InstrumentdeskRecord, ...]
     excluded: tuple[tuple[str, str], ...]
+    leakage: tuple[tuple[str, str, str], ...] = ()
 
     def partitions(self):
         return ('train', self.train), ('calibration', self.calibration), ('replay', self.replay), ('live', self.live)

@@ -57,6 +57,58 @@ def identity(card, field):
     return folded
 
 
+BODY_FIELDS = ('body_number','body_no','body_id','body_code','body_sn','body',
+               'serial_number','serial_no','serial_id','serial_code','serial',
+               'instrument_number','instrument_no','instrument_id','instrument_code','instrument_sn',
+               'instrument_serial','instrument_serial_number',
+               'shell_number','shell_no','piano_number','piano_no','piano_sn',
+               'qin_number','qin_no','qin_id','qin_sn','sn',
+               '琴身编号','琴编号','琴号','机身编号','序列编号','序列号','编号')
+BODY_NESTED = ('instrument_identity','identity','instrument','body','琴','琴身')
+
+
+def read_body_identity(form):
+    """Resolve the physical instrument / body number across import conventions.
+
+    Returns ``None`` when the record carries no number; an explicitly malformed
+    scalar is isolated just like other text identities.
+    """
+    raw = None
+    for name in BODY_FIELDS:
+        if name in form and form[name] not in (None, ''):
+            candidate = form[name]
+            if isinstance(candidate, Mapping):
+                continue
+            raw = candidate
+            break
+    if raw is None:
+        for group in BODY_NESTED:
+            nested = form.get(group)
+            if isinstance(nested, Mapping):
+                for name in BODY_FIELDS:
+                    if name in nested and nested[name] not in (None, ''):
+                        raw = nested[name]
+                        break
+            if raw is not None:
+                break
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise MeasureIssue('body_number', 'TEXT_REQUIRED')
+    if isinstance(raw, int):
+        raw = str(raw)
+    elif isinstance(raw, float) and raw.is_integer():
+        raw = str(int(raw))
+    if not isinstance(raw, str):
+        raise MeasureIssue('body_number', 'TEXT_REQUIRED')
+    folded = normalize('NFKC', raw).strip()
+    if not folded:
+        return None
+    if len(folded) > 64 or not folded.isprintable():
+        raise MeasureIssue('body_number', 'TEXT_INVALID')
+    return folded
+
+
 def number(value, field, minimum, maximum, *, integral=False):
     if type(value) not in {int,float,str}:
         raise MeasureIssue(field,'NUMBER_REQUIRED')
@@ -119,7 +171,9 @@ def read_assay(document):
     
     if sum(value is None for value in readings.values()) > 2:
         raise MeasureIssue('measurements','TOO_FEW_MEASURES')
-    return InstrumentdeskRecord(identifier,district,observed_day,intake_day,reset,closed_at,grade,observed,**readings)
+    body_number = read_body_identity(form)
+    return InstrumentdeskRecord(identifier,district,observed_day,intake_day,reset,closed_at,grade,observed,**readings,
+                                body_number=body_number)
 
 
 def load_samples(batch, as_of):

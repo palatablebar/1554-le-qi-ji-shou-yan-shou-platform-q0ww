@@ -97,12 +97,14 @@ class ShiftAllocation:
         return True
 
 
-def allocate(assessments, attention, policy):
+def allocate(assessments, attention, policy, body_ledger=None):
     desk=ShiftAllocation(policy)
     triaged={}
     route=[]
     for observation in assessments:
         ticket=recommend(observation,attention,policy)
+        if body_ledger is not None:
+            ticket=body_ledger.adjust_job(ticket)
         if ticket.key in triaged:
             raise ValueError('出现重复作业单据')
         triaged[ticket.key]=ticket
@@ -112,7 +114,20 @@ def allocate(assessments, attention, policy):
         risk=dispatch_pressure(order.assessment.raw.input_values,order.job.estimate)
         band=archive_scale(order.assessment.raw.input_values)
         return not order.job.rule_hits,-risk,band,order.job.cost,order.job.key
-    apply_authentication_window(sorted(route,key=priority),desk.approve,desk.wait)
+    signed_bodies=set()
+    def admit(order):
+        if body_ledger is not None:
+            body=body_ledger.body_for_key(order.job.key)
+            if body is not None and body in signed_bodies:
+                desk.wait(order,'BODY_ALREADY_SIGNED','同一琴身编号只签一单')
+                return False
+        approved=desk.approve(order)
+        if approved and body_ledger is not None:
+            body=body_ledger.body_for_key(order.job.key)
+            if body is not None:
+                signed_bodies.add(body)
+        return approved
+    apply_authentication_window(sorted(route,key=priority),admit,desk.wait)
     if len(desk.entries)!=len(route):
         raise ArithmeticError('仍有未处理的候选')
     triaged.update(desk.entries)
@@ -120,8 +135,8 @@ def allocate(assessments, attention, policy):
     return Plan(tuple(rowlist),policy.capacity,desk.remainder,tuple(sorted(desk.load.items())))
 
 
-def plan_jobs(assessments, attention, capacity, mode='balanced'):
-    return allocate(assessments, frozenset(attention), Policy.select(capacity, mode))
+def plan_jobs(assessments, attention, capacity, mode='balanced', body_ledger=None):
+    return allocate(assessments, frozenset(attention), Policy.select(capacity, mode), body_ledger)
 
 
 def action_evidence(plan):
